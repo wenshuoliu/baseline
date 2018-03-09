@@ -373,7 +373,7 @@ class RNNTaggerModel(nn.Module, Tagger):
                 total_tags += len(gold_tags)
                 batch_loss += self.crit(unary, gold_tags)
 
-        return batch_loss / total_tags
+        return batch_loss / len(probv) 
 
     def get_vocab(self, vocab_type='word'):
         return self.word_vocab if vocab_type == 'word' else self.char_vocab
