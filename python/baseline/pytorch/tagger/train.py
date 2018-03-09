@@ -85,15 +85,20 @@ class TaggerTrainerPyTorch(EpochReportingTrainer):
 
     def _train(self, ts):
         self.model.train()
+
+        cyclic = self.scheduler is not None and isinstance(self.scheduler, CyclicLR)
         total_loss = 0
         metrics = {}
         steps = len(ts)
-        if self.scheduler is not None:
+        if self.scheduler is not None and not cyclic:
             self.scheduler.step()
-            #print(self.optimizer.param_groups[0]['lr'])
-        pg = create_progress_bar(steps)
-        for batch_dict in ts:
 
+        pg = create_progress_bar(steps)
+
+        for batch_dict in ts:
+            if self.scheduler is not None and cyclic:
+                self.scheduler.batch_step()
+                #print('LR', self.optimizer.param_groups[0]['lr'])
             inputs = self.model.make_input(batch_dict)
             self.optimizer.zero_grad()
             loss = self.model.compute_loss(inputs)
