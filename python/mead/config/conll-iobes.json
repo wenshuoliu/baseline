@@ -17,7 +17,7 @@
     "model": {
         "model_type": "default",
         "cfiltsz": [3],
-        "hsz": 200,
+        "hsz": 100,
         "wsz": 30,
         "dropout": 0.5,
         "rnntype": "blstm",
@@ -32,7 +32,8 @@
     "train": {
         "epochs": 100,
         "optim": "sgd",
-        "decay": 0.05,
+        "decay_rate": 0.05,
+	"decay_type": "invtime",
         "eta": 0.015,
         "mom": 0.9,
         "patience": 40,

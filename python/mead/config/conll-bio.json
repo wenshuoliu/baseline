@@ -32,7 +32,8 @@
     "train": {
         "epochs": 100,
         "optim": "sgd",
-        "decay": 0.05,
+        "decay_rate": 0.05,
+	"decay_type": "invtime",
         "eta": 0.015,
         "mom": 0.9,
         "patience": 40,

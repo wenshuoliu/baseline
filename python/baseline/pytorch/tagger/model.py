@@ -140,7 +140,7 @@ class RNNTaggerModel(nn.Module, Tagger):
         if y is not None:
             y = torch.autograd.Variable(y.contiguous())
 
-        return torch.autograd.Variable(x), torch.autograd.Variable(xch), lengths, y, ids
+        return {'x': torch.autograd.Variable(x), 'xch': torch.autograd.Variable(xch), 'lengths': lengths, 'y': y, 'ids': ids}
 
     def _compute_unary_tb(self, x, xch, lengths):
 
@@ -186,10 +186,10 @@ class RNNTaggerModel(nn.Module, Tagger):
         return preds
 
     def compute_loss(self, input):
-        x = input[0].transpose(0, 1).contiguous()
-        xch = input[1].transpose(0, 1).contiguous()
-        lengths = input[2]
-        tags = input[3]
+        x = input['x'].transpose(0, 1).contiguous()
+        xch = input['xch'].transpose(0, 1).contiguous()
+        lengths = input['lengths']
+        tags = input['y']
 
         probv = self._compute_unary_tb(x, xch, lengths)
         batch_loss = 0.

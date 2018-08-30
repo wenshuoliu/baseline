@@ -34,6 +34,7 @@ class TaggerEvaluatorTf(object):
 
     def process_batch(self, batch_dict, handle=None, txts=None):
 
+        batch_dict = self.model.make_input(batch_dict)
         guess = self.model.predict(batch_dict)
         sentence_lengths = batch_dict['lengths']
         ids = batch_dict['ids']
