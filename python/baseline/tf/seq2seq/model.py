@@ -233,6 +233,7 @@ class EncoderDecoderModelBase(EncoderDecoderModel):
         Constructor = eval(tgt_class_name)
         tgt_embedding = Constructor('tgt', **embed_args)
         model = cls.create(src_embeddings, tgt_embedding, **state)
+        # TODO(dpressel): is this redundant?
         for prop in ls_props(model):
             if prop in state:
                 setattr(model, prop, state[prop])

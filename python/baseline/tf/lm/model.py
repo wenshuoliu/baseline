@@ -307,6 +307,7 @@ class LanguageModelBase(LanguageModel):
             embeddings[key] = Constructor(key, **embed_args)
 
         model = cls.create(embeddings, **state)
+        # TODO(dpressel): is this redundant?
         for prop in ls_props(model):
             if prop in state:
                 setattr(model, prop, state[prop])

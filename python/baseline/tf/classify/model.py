@@ -150,6 +150,8 @@ class ClassifierModelBase(ClassifierModel):
         """Base
         """
         super(ClassifierModelBase, self).__init__()
+        self._hsz = None
+        self._lengths_key = None
 
     def set_saver(self, saver):
         self.saver = saver
@@ -189,7 +191,7 @@ class ClassifierModelBase(ClassifierModel):
         write_json(self.labels, basename + ".labels")
         for key, embedding in self.embeddings.items():
             embedding.save_md(basename + '-{}-md.json'.format(key))
-        tf.train.write_graph(self.sess.graph_def, outdir, base + '.graph', as_text=False)
+        #tf.train.write_graph(self.sess.graph_def, outdir, base + '.graph', as_text=False)
         with open(basename + '.saver', 'w') as f:
             f.write(str(self.saver.as_saver_def()))
 
@@ -265,6 +267,49 @@ class ClassifierModelBase(ClassifierModel):
         """
         return self.labels
 
+
+    @classmethod
+    def load(cls, basename, **kwargs):
+        state = read_json(basename + '.state')
+        if 'predict' in kwargs:
+            state['predict'] = kwargs['predict']
+
+        if 'beam' in kwargs:
+            state['beam'] = kwargs['beam']
+
+        state['sess'] = kwargs.get('sess', tf.Session())
+        state['model_type'] = kwargs.get('model_type', 'default')
+
+        with open(basename + '.saver') as fsv:
+            saver_def = tf.train.SaverDef()
+            text_format.Merge(fsv.read(), saver_def)
+
+        src_embeddings = dict()
+        src_embeddings_dict = state.pop('src_embeddings')
+        for key, class_name in src_embeddings_dict.items():
+            md = read_json('{}-{}-md.json'.format(basename, key))
+            embed_args = dict({'vsz': md['vsz'], 'dsz': md['dsz']})
+            Constructor = eval(class_name)
+            src_embeddings[key] = Constructor(key, **embed_args)
+
+        tgt_class_name = state.pop('tgt_embedding')
+        md = read_json('{}-tgt-md.json'.format(basename))
+        embed_args = dict({'vsz': md['vsz'], 'dsz': md['dsz']})
+        Constructor = eval(tgt_class_name)
+        tgt_embedding = Constructor('tgt', **embed_args)
+        model = cls.create(src_embeddings, tgt_embedding, **state)
+        for prop in ls_props(model):
+            if prop in state:
+                setattr(model, prop, state[prop])
+        do_init = kwargs.get('init', True)
+        if do_init:
+            init = tf.global_variables_initializer()
+            model.sess.run(init)
+
+        model.saver = tf.train.Saver()
+        model.saver.restore(model.sess, basename)
+        return model
+
     @classmethod
     def load(cls, basename, **kwargs):
         """Reload the model from a graph file and a checkpoint
@@ -281,52 +326,39 @@ class ClassifierModelBase(ClassifierModel):
         
         :return: A restored model
         """
-        sess = kwargs.get('session', kwargs.get('sess', tf.Session()))
-        model = cls()
+        state = read_json(basename + '.state')
+        state['sess'] = kwargs.get('sess', tf.Session())
+        state['model_type'] = kwargs.get('model_type', 'default')
+
         with open(basename + '.saver') as fsv:
             saver_def = tf.train.SaverDef()
             text_format.Merge(fsv.read(), saver_def)
 
-        checkpoint_name = kwargs.get('checkpoint_name', basename)
-        checkpoint_name = checkpoint_name or basename
+        embeddings = dict()
+        embeddings_dict = state.pop('embeddings')
+        for key, class_name in embeddings_dict.items():
+            md = read_json('{}-{}-md.json'.format(basename, key))
+            embed_args = dict({'vsz': md['vsz'], 'dsz': md['dsz']})
+            Constructor = eval(class_name)
+            embeddings[key] = Constructor(key, **embed_args)
 
-        state = read_json(basename + '.state')
-
+        labels = read_json(basename + '.labels')
+        model = cls.create(embeddings, labels, **state)
+        # TODO(dpressel): is this redundant?
         for prop in ls_props(model):
             if prop in state:
                 setattr(model, prop, state[prop])
+        do_init = kwargs.get('init', True)
+        if do_init:
+            init = tf.global_variables_initializer()
+            model.sess.run(init)
 
-        with gfile.FastGFile(basename + '.graph', 'rb') as f:
-            gd = tf.GraphDef()
-            gd.ParseFromString(f.read())
-            sess.graph.as_default()
-            tf.import_graph_def(gd, name='')
-            try:
-                sess.run(saver_def.restore_op_name, {saver_def.filename_tensor_name: checkpoint_name})
-            except:
-                # Backwards compat
-                sess.run(saver_def.restore_op_name, {saver_def.filename_tensor_name: checkpoint_name + ".model"})
+        model.saver = tf.train.Saver()
 
-        model.embeddings = dict()
-        for key, class_name in state['embeddings'].items():
-            md = read_json('{}-{}-md.json'.format(basename, key))
-            embed_args = dict({'vsz': md['vsz'], 'dsz': md['dsz']})
-            embed_args[key] = tf.get_default_graph().get_tensor_by_name('{}:0'.format(key))
-            Constructor = eval(class_name)
-            model.embeddings[key] = Constructor(key, **embed_args)
+        checkpoint_name = kwargs.get('checkpoint_name', basename)
+        checkpoint_name = checkpoint_name or basename
 
-        if model.lengths_key is not None:
-            model.lengths = tf.get_default_graph().get_tensor_by_name('lengths:0')
-
-        else:
-            model.lengths = None
-        model.probs = tf.get_default_graph().get_tensor_by_name('output/probs:0')
-
-        model.best = tf.get_default_graph().get_tensor_by_name('output/best:0')
-        model.logits = tf.get_default_graph().get_tensor_by_name('output/logits:0')
-
-        model.labels = read_json(basename + '.labels')
-        model.sess = sess
+        model.saver.restore(model.sess, checkpoint_name)
         return model
 
     @property
@@ -336,6 +368,15 @@ class ClassifierModelBase(ClassifierModel):
     @lengths_key.setter
     def lengths_key(self, value):
         self._lengths_key = value
+
+    @property
+    def hsz(self):
+        return self._hsz
+
+    @hsz.setter
+    def hsz(self, value):
+        self._hsz = value
+
 
     @property
     def pkeep(self):
@@ -463,12 +504,12 @@ class ClassifierModelBase(ClassifierModel):
         :return: The final layer
         """
 
-        hszs = listify(kwargs.get('hsz', []))
-        if len(hszs) == 0:
+        self.hsz = listify(kwargs.get('hsz', []))
+        if len(self.hsz) == 0:
             return pooled
 
         in_layer = pooled
-        for i, hsz in enumerate(hszs):
+        for i, hsz in enumerate(self.hsz):
             fc = tf.layers.dense(in_layer, hsz, activation=tf.nn.relu, kernel_initializer=init, name='fc-{}'.format(i))
             in_layer = tf.nn.dropout(fc, self.pkeep, name='fc-dropout-{}'.format(i))
         return in_layer
@@ -484,6 +525,24 @@ class ConvModel(ClassifierModelBase):
         """Constructor 
         """
         super(ConvModel, self).__init__()
+        self._cmotsz = None
+        self._filtsz = None
+
+    @property
+    def cmotsz(self):
+        return self._cmotsz
+
+    @cmotsz.setter
+    def cmotsz(self, cmotsz_):
+        self._cmotsz = cmotsz_
+
+    @property
+    def filtsz(self):
+        return self._filtsz
+
+    @filtsz.setter
+    def filtsz(self, filtsz_):
+        self._filtsz = filtsz_
 
     def pool(self, word_embeddings, dsz, init, **kwargs):
         """Do parallel convolutional filtering with varied receptive field widths, followed by max-over-time pooling
@@ -501,10 +560,10 @@ class ConvModel(ClassifierModelBase):
         
         :return: 
         """
-        cmotsz = kwargs['cmotsz']
-        filtsz = kwargs['filtsz']
+        self.cmotsz = kwargs['cmotsz']
+        self.filtsz = kwargs['filtsz']
 
-        combine, _ = parallel_conv(word_embeddings, filtsz, dsz, cmotsz)
+        combine, _ = parallel_conv(word_embeddings, self.filtsz, dsz, self.cmotsz)
         # Definitely drop out
         with tf.name_scope("dropout"):
             combine = tf.nn.dropout(combine, self.pkeep)
@@ -520,6 +579,9 @@ class LSTMModel(ClassifierModelBase):
     def __init__(self):
         super(LSTMModel, self).__init__()
         self._vdrop = None
+        self._rnnsz = None
+        self._rnntype = None
+        self._layers = None
 
     @property
     def vdrop(self):
@@ -528,6 +590,32 @@ class LSTMModel(ClassifierModelBase):
     @vdrop.setter
     def vdrop(self, value):
         self._vdrop = value
+
+    @property
+    def rnnsz(self):
+        return self._rnnsz
+
+    @rnnsz.setter
+    def rnnsz(self, value):
+        self._rnnsz = value
+
+    @property
+    def rnntype(self):
+        return self._rnntype
+
+    @rnntype.setter
+    def rnntype(self, value):
+        self._rnntype = value
+
+    @property
+    def layers(self):
+        return self._layers
+
+    @layers.setter
+    def layers(self, value):
+        self._layers = value
+
+
 
     def pool(self, word_embeddings, dsz, init, **kwargs):
         """LSTM with dropout yielding a final-state as output
@@ -544,17 +632,18 @@ class LSTMModel(ClassifierModelBase):
         
         :return: 
         """
-        hsz = kwargs.get('rnnsz', kwargs.get('hsz', 100))
+        rnnsz = kwargs.get('rnnsz', kwargs.get('hsz', 100))
         vdrop = bool(kwargs.get('variational_dropout', False))
-        if type(hsz) is list:
-            hsz = hsz[0]
+        if type(rnnsz) is list:
+            rnnsz = rnnsz[0]
 
-        rnntype = kwargs.get('rnn_type', kwargs.get('rnntype', 'lstm'))
-        nlayers = int(kwargs.get('layers', 1))
+        self.rnnsz = rnnsz
+        self.rnntype = kwargs.get('rnn_type', kwargs.get('rnntype', 'lstm'))
+        self.layers = int(kwargs.get('layers', 1))
 
-        if rnntype == 'blstm':
-            rnnfwd = stacked_lstm(hsz//2, self.pkeep, nlayers, variational=vdrop)
-            rnnbwd = stacked_lstm(hsz//2, self.pkeep, nlayers, variational=vdrop)
+        if self.rnntype == 'blstm':
+            rnnfwd = stacked_lstm(rnnsz//2, self.pkeep, self.layers, variational=vdrop)
+            rnnbwd = stacked_lstm(rnnsz//2, self.pkeep, self.layers, variational=vdrop)
             ((_, _), (fw_final_state, bw_final_state)) = tf.nn.bidirectional_dynamic_rnn(rnnfwd,
                                                                                          rnnbwd,
                                                                                          word_embeddings,
@@ -562,15 +651,13 @@ class LSTMModel(ClassifierModelBase):
                                                                                          dtype=tf.float32)
             # The output of the BRNN function needs to be joined on the H axis
             output_state = fw_final_state[-1].h + bw_final_state[-1].h
-            out_hsz = hsz
 
         else:
-            rnnfwd = stacked_lstm(hsz, self.pkeep, nlayers, variational=vdrop)
+            rnnfwd = stacked_lstm(rnnsz, self.pkeep, self.layers, variational=vdrop)
             (_, (output_state)) = tf.nn.dynamic_rnn(rnnfwd, word_embeddings, sequence_length=self.lengths, dtype=tf.float32)
             output_state = output_state[-1].h
-            out_hsz = hsz
 
-        combine = tf.reshape(output_state, [-1, out_hsz])
+        combine = tf.reshape(output_state, [-1, rnnsz])
         return combine
 
 
