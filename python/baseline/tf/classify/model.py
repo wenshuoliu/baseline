@@ -267,49 +267,6 @@ class ClassifierModelBase(ClassifierModel):
         """
         return self.labels
 
-
-    @classmethod
-    def load(cls, basename, **kwargs):
-        state = read_json(basename + '.state')
-        if 'predict' in kwargs:
-            state['predict'] = kwargs['predict']
-
-        if 'beam' in kwargs:
-            state['beam'] = kwargs['beam']
-
-        state['sess'] = kwargs.get('sess', tf.Session())
-        state['model_type'] = kwargs.get('model_type', 'default')
-
-        with open(basename + '.saver') as fsv:
-            saver_def = tf.train.SaverDef()
-            text_format.Merge(fsv.read(), saver_def)
-
-        src_embeddings = dict()
-        src_embeddings_dict = state.pop('src_embeddings')
-        for key, class_name in src_embeddings_dict.items():
-            md = read_json('{}-{}-md.json'.format(basename, key))
-            embed_args = dict({'vsz': md['vsz'], 'dsz': md['dsz']})
-            Constructor = eval(class_name)
-            src_embeddings[key] = Constructor(key, **embed_args)
-
-        tgt_class_name = state.pop('tgt_embedding')
-        md = read_json('{}-tgt-md.json'.format(basename))
-        embed_args = dict({'vsz': md['vsz'], 'dsz': md['dsz']})
-        Constructor = eval(tgt_class_name)
-        tgt_embedding = Constructor('tgt', **embed_args)
-        model = cls.create(src_embeddings, tgt_embedding, **state)
-        for prop in ls_props(model):
-            if prop in state:
-                setattr(model, prop, state[prop])
-        do_init = kwargs.get('init', True)
-        if do_init:
-            init = tf.global_variables_initializer()
-            model.sess.run(init)
-
-        model.saver = tf.train.Saver()
-        model.saver.restore(model.sess, basename)
-        return model
-
     @classmethod
     def load(cls, basename, **kwargs):
         """Reload the model from a graph file and a checkpoint
