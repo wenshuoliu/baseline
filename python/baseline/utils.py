@@ -8,6 +8,7 @@ import logging
 import zipfile
 import platform
 import importlib
+
 from operator import lt, le, gt, ge
 from contextlib import contextmanager
 from functools import partial, update_wrapper, wraps
@@ -46,7 +47,6 @@ def export(obj, all_list=None):
 
 
 exporter = export(__all__)
-
 
 @exporter
 class Offsets:

@@ -1,7 +1,8 @@
 import os
+from copy import deepcopy
 from functools import partial
 import pytest
-from baseline.utils import get_env_gpus
+from baseline.utils import get_env_gpus, Offsets
 
 
 @pytest.fixture
@@ -46,3 +47,4 @@ def test_none(remove_envs):
     gold = ['0']
     gpus = get_env_gpus()
     assert gpus == gold
+
