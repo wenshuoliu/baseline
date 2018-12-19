@@ -1,5 +1,4 @@
 import os
-from copy import deepcopy
 from functools import partial
 import pytest
 from baseline.utils import get_env_gpus
