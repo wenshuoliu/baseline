@@ -2,7 +2,7 @@ import os
 from copy import deepcopy
 from functools import partial
 import pytest
-from baseline.utils import get_env_gpus, Offsets
+from baseline.utils import get_env_gpus
 
 
 @pytest.fixture
@@ -48,3 +48,7 @@ def test_none(remove_envs):
     gpus = get_env_gpus()
     assert gpus == gold
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> fix bad merge
