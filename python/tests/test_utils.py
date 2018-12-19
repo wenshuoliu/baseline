@@ -47,8 +47,3 @@ def test_none(remove_envs):
     gold = ['0']
     gpus = get_env_gpus()
     assert gpus == gold
-
-<<<<<<< HEAD
-=======
-
->>>>>>> fix bad merge
