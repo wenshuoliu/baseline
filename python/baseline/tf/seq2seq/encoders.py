@@ -12,8 +12,9 @@ exporter = export(__all__)
 @exporter
 class EncoderBase(object):
 
-    def __init__(self):
-        pass
+    def __init__(self, **kwargs):
+        self.state = copy.deepcopy(kwargs)
+
 
     def encode(self, embed_in, src_len, pdrop, **kwargs):
         pass
@@ -26,7 +27,7 @@ RNNEncoderOutput = namedtuple("RNNEncoderOutput", ("output", "hidden"))
 class RNNEncoder(EncoderBase):
 
     def __init__(self, **kwargs):
-        super(EncoderBase, self).__init__()
+        super(RNNEncoder, self).__init__(**kwargs)
 
     def encode(self, embed_in, src_len, pdrop, hsz=650, rnntype='blstm', layers=1, vdrop=False, **kwargs):
 
@@ -65,7 +66,7 @@ TransformerEncoderOutput = namedtuple("TransformerEncoderOutput", ("output", "sr
 class TransformerEncoder(EncoderBase):
 
     def __init__(self, **kwargs):
-        super(TransformerEncoder, self).__init__()
+        super(TransformerEncoder, self).__init__(**kwargs)
 
     def encode(self,
                embed_in,

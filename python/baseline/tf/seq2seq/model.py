@@ -187,6 +187,7 @@ class DataParallelEncoderDecoderModel(EncoderDecoderModel):
         self.inference.load(basename, **kwargs)
 
 
+@register_model(task='seq2seq', name=['default', 'attn'])
 class EncoderDecoderModelBase(EncoderDecoderModel):
 
     def create_loss(self):
@@ -202,6 +203,9 @@ class EncoderDecoderModelBase(EncoderDecoderModel):
     def __init__(self):
         super(EncoderDecoderModelBase, self).__init__()
         self.saver = None
+        self.src_lengths_key = None
+        self.dropin_value = {}
+        self.inputs = ['src_len', 'tgt_len', 'mx_tgt_len']
 
     @classmethod
     def load(cls, basename, **kwargs):
@@ -239,6 +243,7 @@ class EncoderDecoderModelBase(EncoderDecoderModel):
 
         model.saver = tf.train.Saver()
         model.saver.restore(model.sess, basename)
+
         return model
 
     def embed(self, **kwargs):
@@ -255,18 +260,13 @@ class EncoderDecoderModelBase(EncoderDecoderModel):
         word_embeddings = tf.concat(values=all_embeddings_src, axis=-1)
         return word_embeddings
 
-    def _create_model_state(self, **kwargs):
-        src_embeddings_info = {}
-        for k, v in self.src_embeddings.items():
-            src_embeddings_info[k] = v.__class__.__name__
-        sess = kwargs.pop('sess', tf.Session())
-        self.state = copy.deepcopy(kwargs)
-        kwargs['sess'] = sess
-        self.state.update({
-            "version": __version__,
-            "src_embeddings": src_embeddings_info,
-            "tgt_embedding": self.tgt_embedding.__class__.__name__,
-        })
+    def create_state(self, **kwargs):
+        self.state = {k: v for k, v in kwargs.items() if k not in self.inputs + ['sess', 'tgt'] + list(self.src_embeddings.keys())}
+
+    def optional_input(self, kwargs, field, shape=None, dtype=tf.int32):
+        if field not in self.inputs:
+            raise Exception("Undefined input {}, add to self.inputs!".format(field))
+        return kwargs.pop(field, tf.placeholder(dtype, shape, name=field))
 
     @classmethod
     def create(cls, src_embeddings, tgt_embedding, **kwargs):
@@ -279,12 +279,11 @@ class EncoderDecoderModelBase(EncoderDecoderModel):
         model = cls()
         model.src_embeddings = src_embeddings
         model.tgt_embedding = tgt_embedding
-        model._create_model_state(**kwargs)
         model.sess = kwargs.get('sess', tf.Session())
-
-        model.src_len = kwargs.pop('src_len', tf.placeholder(tf.int32, [None], name="src_len"))
-        model.tgt_len = kwargs.pop('tgt_len', tf.placeholder(tf.int32, [None], name="tgt_len"))
-        model.mx_tgt_len = kwargs.pop('mx_tgt_len', tf.placeholder(tf.int32, name="mx_tgt_len"))
+        model.src_len = model.optional_input(kwargs, 'src_len', [None])
+        model.tgt_len = model.optional_input(kwargs, 'tgt_len', [None])
+        model.mx_tgt_len = model.optional_input(kwargs, 'mx_tgt_len')
+        model.create_state(**kwargs)
         model.src_lengths_key = kwargs.get('src_lengths_key')
         model.id = kwargs.get('id', 0)
         model.pdrop_value = kwargs.get('dropout', 0.5)
@@ -296,18 +295,11 @@ class EncoderDecoderModelBase(EncoderDecoderModel):
             embed_in = model.embed(**kwargs)
             encoder_output = model.encode(embed_in, **kwargs)
             model.decode(encoder_output, **kwargs)
-            return model
+
+        return model
 
     def set_saver(self, saver):
         self.saver = saver
-
-    ##@property
-    def src_lengths_key(self):
-        return self._src_lengths_key
-
-    ##@src_lengths_key.setter
-    def src_lengths_key(self, value):
-        self._src_lengths_key = value
 
     def create_encoder(self, **kwargs):
         return create_seq2seq_encoder(**kwargs)
@@ -316,21 +308,44 @@ class EncoderDecoderModelBase(EncoderDecoderModel):
         return create_seq2seq_decoder(self.tgt_embedding, **kwargs)
 
     def decode(self, encoder_output, **kwargs):
-        self.decoder = self.create_decoder(**kwargs)
+        decoder_props = kwargs.get('decoder', {})
+        decoder_props['hsz'] = decoder_props.get('hsz', kwargs.get('hsz'))
+        #decoder_props['dropout'] = decoder_props.get('dropout', kwargs.get('dropout'))
+        decoder_props['layers'] = decoder_props.get('layers', kwargs.get('layers'))
+        self.decoder = self.create_decoder(**decoder_props)
+
         predict = kwargs.get('predict', False)
         if predict:
-            self.decoder.predict(encoder_output, self.src_len, self.pdrop_value, **kwargs)
+            self.decoder.predict(encoder_output, self.src_len, self.pdrop_value, **decoder_props)
         else:
-            self.decoder.decode(encoder_output, self.src_len, self.tgt_len, self.pdrop_value, **kwargs)
+            self.decoder.decode(encoder_output, self.src_len, self.tgt_len, self.pdrop_value, **decoder_props)
 
     def encode(self, embed_in, **kwargs):
         with tf.variable_scope('encode'):
-            self.encoder = self.create_encoder(**kwargs)
-            return self.encoder.encode(embed_in, self.src_len, self.pdrop_value, **kwargs)
+            encoder_props = kwargs.get('encoder', {})
+            encoder_props['hsz'] = encoder_props.get('hsz', kwargs.get('hsz'))
+            encoder_props['layers'] = encoder_props.get('layers', kwargs.get('layers'))
+
+            self.encoder = self.create_encoder(**encoder_props)
+
+            return self.encoder.encode(embed_in, self.src_len, self.pdrop_value, **encoder_props)
 
     def save_md(self, basename):
 
-        write_json(self.state, basename + '.state')
+        state = {k: v for k, v in self.state.items()}
+        src_embeddings_state = {}
+        for k, v in self.src_embeddings.items():
+            src_embeddings_state[k] = v.state
+
+        state.update({
+            "version": __version__,
+            "src_embeddings": src_embeddings_state,
+            "tgt_embedding": self.tgt_embedding.state,
+            "decoder": self.decoder.state,
+            "encoder": self.encoder.state
+        })
+
+        write_json(state, basename + '.state')
         for key, embedding in self.src_embeddings.items():
             embedding.save_md('{}-{}-md.json'.format(basename, key))
 
@@ -355,15 +370,6 @@ class EncoderDecoderModelBase(EncoderDecoderModel):
         feed_dict = self.make_input(batch_dict)
         x = self.sess.run(self.decoder.probs, feed_dict=feed_dict)
         return x
-
-
-    @property
-    def dropin_value(self):
-        return self._dropin_value
-
-    @dropin_value.setter
-    def dropin_value(self, dict_value):
-        self._dropin_value = dict_value
 
     def drop_inputs(self, key, x, do_dropout):
         v = self.dropin_value.get(key, 0)
@@ -394,19 +400,3 @@ class EncoderDecoderModelBase(EncoderDecoderModel):
             feed_dict[self.mx_tgt_len] = np.max(batch_dict['tgt_lengths'])
 
         return feed_dict
-
-
-@register_model(task='seq2seq', name=['default', 'attn'])
-class Seq2Seq(EncoderDecoderModelBase):
-
-    def __init__(self):
-        super(Seq2Seq, self).__init__()
-        self._vdrop = False
-
-    @property
-    def vdrop(self):
-        return self._vdrop
-
-    @vdrop.setter
-    def vdrop(self, value):
-        self._vdrop = value

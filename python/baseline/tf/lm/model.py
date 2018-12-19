@@ -315,14 +315,7 @@ class RNNLanguageModel(LanguageModelBase):
     def __init__(self):
         super(RNNLanguageModel, self).__init__()
         self.rnntype = 'lstm'
-
-    @property
-    def vdrop(self):
-        return self._vdrop
-
-    @vdrop.setter
-    def vdrop(self, value):
-        self._vdrop = value
+        self.vdrop = False
 
     def decode(self, inputs, rnntype='lstm', variational_dropout=False, **kwargs):
 

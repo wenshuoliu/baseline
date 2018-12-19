@@ -4,6 +4,7 @@ import tensorflow as tf
 from baseline.utils import write_json, Offsets
 from baseline.embeddings import register_embeddings
 from baseline.tf.tfy import embed, pool_chars, get_shape_as_list, stacked_lstm
+import copy
 
 
 class TensorFlowEmbeddings(object):
@@ -68,8 +69,12 @@ class TensorFlowEmbeddings(object):
         :param kwargs:
         :return:
         """
-        return cls(name, vsz=model.vsz, dsz=model.dsz, weights=model.weights, **kwargs)
+        obj = cls(name, vsz=model.vsz, dsz=model.dsz, weights=model.weights, **kwargs)
+        obj.create_state(**kwargs)
+        return obj
 
+    def create_state(self, **kwargs):
+        self.state = copy.deepcopy(kwargs)
 
 @register_embeddings(name='default')
 class LookupTableEmbeddings(TensorFlowEmbeddings):
@@ -127,10 +132,6 @@ class LookupTableEmbeddings(TensorFlowEmbeddings):
                                      scope=self.scope,
                                      finetune=self.finetune,
                                      weights=self.weights)
-
-    @classmethod
-    def create(cls, model, name, **kwargs):
-        return cls(name, vsz=model.vsz, dsz=model.dsz, weights=model.weights, **kwargs)
 
     def encode(self, x=None):
         """Build a simple Lookup Table and set as input `x` if it exists, or `self.x` otherwise.
@@ -226,10 +227,6 @@ class CharConvEmbeddings(TensorFlowEmbeddings):
     # Warning this function is only initialized AFTER encode
     def get_dsz(self):
         return self.wsz
-
-    @classmethod
-    def create(cls, model, name, **kwargs):
-        return cls(name=name, vsz=model.vsz, dsz=model.dsz, weights=model.weights, **kwargs)
 
 
 def get_timing_signal_1d(length,

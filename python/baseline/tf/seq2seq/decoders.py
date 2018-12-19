@@ -18,6 +18,7 @@ class DecoderBase(object):
         self.beam_width = kwargs.get('beam', 1)
         self.best = None
         self.probs = None
+        self.state = copy.deepcopy(kwargs)
 
     def output(self, best, do_probs=True):
         with tf.variable_scope("Output"):
@@ -304,14 +305,6 @@ class RNNDecoderWithAttn(RNNDecoder):
     def __init__(self, tgt_embedding, **kwargs):
         super(RNNDecoderWithAttn, self).__init__(tgt_embedding, **kwargs)
         self.attn_type = kwargs.get('attn_type', 'bahdanau').lower()
-
-    @property
-    def attn_type(self):
-        return self._attn_type
-
-    @attn_type.setter
-    def attn_type(self, type):
-        self._attn_type = type
 
     def _create_cell(self, rnn_enc_tensor, src_len, pdrop, rnntype='lstm', layers=1, vdrop=False, **kwargs):
         cell = multi_rnn_cell_w_dropout(self.hsz, pdrop, rnntype, layers, variational=vdrop, training=TRAIN_FLAG())

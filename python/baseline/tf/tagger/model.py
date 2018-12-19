@@ -14,13 +14,10 @@ from baseline.utils import listify, Offsets
 
 class TaggerModelBase(TaggerModel):
 
-    @property
-    def lengths_key(self):
-        return self._lengths_key
-
-    @lengths_key.setter
-    def lengths_key(self, value):
-        self._lengths_key = value
+    def __init__(self):
+        super(TaggerModel, self).__init__()
+        self.dropin_value = {}
+        self.lengths_key = None
 
     def save_values(self, basename):
         self.saver.save(self.sess, basename)
@@ -53,14 +50,6 @@ class TaggerModelBase(TaggerModel):
         tf.train.write_graph(self.sess.graph_def, outdir, base + '.graph', as_text=False)
         with open(basename + '.saver', 'w') as f:
             f.write(str(self.saver.as_saver_def()))
-
-    @property
-    def dropin_value(self):
-        return self._dropin_value
-
-    @dropin_value.setter
-    def dropin_value(self, dict_value):
-        self._dropin_value = dict_value
 
     def drop_inputs(self, key, x, do_dropout):
         v = self.dropin_value.get(key, 0)
@@ -316,16 +305,9 @@ class TaggerModelBase(TaggerModel):
 @register_model(task='tagger', name='default')
 class RNNTaggerModel(TaggerModelBase):
 
-    @property
-    def vdrop(self):
-        return self._vdrop
-
-    @vdrop.setter
-    def vdrop(self, value):
-        self._vdrop = value
-
     def __init__(self):
         super(RNNTaggerModel, self).__init__()
+        self.vdrop = False
 
     def encode(self, embedseq, **kwargs):
         self.vdrop = kwargs.get('variational_dropout', False)
