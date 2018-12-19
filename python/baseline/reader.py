@@ -77,6 +77,7 @@ def _filter_vocab(vocab, min_fs):
 
 
 def _read_from_col(col, files, col_splitter=r'\t', word_splitter=r'\s'):
+
     """Read from a single column of a file.
 
     :param col: `int`: The column to read from.
@@ -98,6 +99,7 @@ def _read_from_col(col, files, col_splitter=r'\t', word_splitter=r'\s'):
 
 
 def _build_vocab_for_col(col, files, vectorizers, text=None, col_splitter=r'\t', word_splitter=r'\s'):
+
     """Build vocab from a single column in file. (separated by `\t`).
 
     Used to read a vocab from a single conll column, read a vocab from the
