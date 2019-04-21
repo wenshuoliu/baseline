@@ -197,11 +197,22 @@ class TSVParallelCorpusReader(ParallelCorpusReader):
 
     def load_examples(self, tsfile, src_vocabs, tgt_vocab, do_shuffle, src_sort_key):
         ts = []
+        lengths = []
+        bad_lines = 0
+        too_long = 0
+        max_line = 760
         with codecs.open(tsfile, encoding='utf-8', mode='r') as f:
-            for line in f:
-                splits = re.split("\t", line.strip())
-                src = list(filter(lambda x: len(x) != 0, re.split("\s+", splits[0])))
+            for i, line in enumerate(f):
 
+                splits = re.split("\t", line.strip())
+                if len(splits) != 2:
+                    bad_lines += 1
+                    continue
+                src = list(filter(lambda x: len(x) != 0, re.split("\s+", splits[0])))
+                lengths.append(len(src))
+                if len(src) >= max_line:
+                    too_long += 1
+                    continue
                 example = {}
                 for k, vectorizer in self.src_vectorizers.items():
                     example[k], length = vectorizer.run(src, src_vocabs[k])
@@ -211,6 +222,11 @@ class TSVParallelCorpusReader(ParallelCorpusReader):
                 tgt = list(filter(lambda x: len(x) != 0, re.split("\s+", splits[1])))
                 example['tgt'], example['tgt_lengths'] = self.tgt_vectorizer.run(tgt, tgt_vocab)
                 ts.append(example)
+        a = np.array(lengths)
+        print('stats', a.mean(), a.max(), a.min(), np.median(a))
+        print('bad lines', bad_lines)
+        print('too_long', too_long)
+        print('good examples', len(ts))
         return baseline.data.Seq2SeqExamples(ts, do_shuffle=do_shuffle, src_sort_key=src_sort_key)
 
 
