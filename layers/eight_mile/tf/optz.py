@@ -664,16 +664,20 @@ class EagerOptimizer(object):
                 logger.info("adam(eta=%f beta1=%f, beta2=%f, eps=%f)", lr, beta1, beta2, eps)
                 self.optimizer = tf.keras.optimizers.Adam(lr_function, beta1, beta2, eps)
             elif optim == "adamw":
-                import tensorflow_addons as tfa
-
-                wd = float(kwargs.get("weight_decay", 0))
                 beta1 = float(kwargs.get("beta1", 0.9))
                 beta2 = float(kwargs.get("beta2", 0.999))
                 eps = float(kwargs.get("epsilon", 1e-8))
-                logger.info("adamw(eta=%f beta1=%f, beta2=%f, eps=%f)", lr, beta1, beta2, eps)
-                self.optimizer = tfa.optimizers.AdamW(
-                    weight_decay=wd, learning_rate=lr_function, beta_1=beta1, beta_2=beta2, epsilon=eps
-                )
+                if tf.executing_eagerly() and get_version(tf) < 2:
+                    self.optimizer = tf.keras.optimizers.Adam(lr_function, beta1, beta2, eps)
+                    logger.warning("Can't use adamw with TF1.x + eager mode, setting optimizer to adam.")
+                else:
+                    import tensorflow_addons as tfa
+
+                    wd = float(kwargs.get("weight_decay", 0))
+                    logger.info("adamw(eta=%f beta1=%f, beta2=%f, eps=%f)", lr, beta1, beta2, eps)
+                    self.optimizer = tfa.optimizers.AdamW(
+                        weight_decay=wd, learning_rate=lr_function, beta_1=beta1, beta_2=beta2, epsilon=eps
+                    )
             elif optim == "rmsprop":
                 # Get mom again with difference default
                 mom = float(kwargs.get("mom", 0.0))
