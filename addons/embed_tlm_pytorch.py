@@ -9,7 +9,7 @@ from eight_mile.pytorch.layers import TransformerEncoderStack, subsequent_mask
 from eight_mile.pytorch.embeddings import PyTorchEmbeddings, PositionalLookupTableEmbeddings, LearnedPositionalLookupTableEmbeddings
 from baseline.embeddings import register_embeddings, create_embeddings
 from baseline.pytorch.embeddings import PyTorchEmbeddingsModel
-from baseline.vectorizers import register_vectorizer, AbstractVectorizer, BPEVectorizer1D
+from baseline.vectorizers import register_vectorizer, AbstractVectorizer, BPEVectorizer1D, Token1DVectorizer, Char2DVectorizer
 from baseline.pytorch.torchy import *
 from eight_mile.pytorch.serialize import load_tlm_npz
 import torch.nn as nn
@@ -109,6 +109,60 @@ class BPEVectorizer1DFT(BPEVectorizer1D):
         return vec1d, valid_length
 
 
+@register_vectorizer(name='tlm-char2d')
+class Char2DVectorizerFT(Char2DVectorizer):
+    """Override char2d vectorizer to generate [CLS] for pooling"""
+    def _next_element(self, tokens, vocab):
+        OOV = vocab['<UNK>']
+        EOW = vocab.get('<EOW>', vocab.get(' ', Offsets.PAD))
+        CLS = vocab['[CLS]']
+        for token in self.iterable(tokens):
+            for ch in token:
+                yield vocab.get(ch, OOV)
+            yield EOW
+        yield CLS
+
+    def run(self, tokens, vocab):
+
+        if self.mxlen < 0:
+            self.mxlen = self.max_seen_tok
+        if self.mxwlen < 0:
+            self.mxwlen = self.max_seen_char
+
+        EOW = vocab.get('<EOW>', vocab.get(' ', Offsets.PAD))
+        CLS = vocab['[CLS]']
+        vec2d = np.zeros((self.mxlen, self.mxwlen), dtype=int)
+        i = 0
+        j = 0
+        over = False
+        for atom in self._next_element(tokens, vocab):
+            if over:
+                # If if we have gone over mxwlen burn tokens until we hit end of word
+                if atom == EOW:
+                    over = False
+                continue
+            if i == self.mxlen:
+                i -= 1
+                vec2d[i, :] = CLS  # fill last word with all CLS to avoid smearing by max pool
+                break
+            elif atom == CLS:
+                vec2d[i, :] = CLS  # fill that word with all CLS to avoid smearing by max pool
+            if atom == EOW:
+                i += 1
+                j = 0
+                continue
+            elif j == self.mxwlen:
+                over = True
+                i += 1
+                j = 0
+                continue
+            else:
+                vec2d[i, j] = atom
+                j += 1
+        valid_length = i
+        return vec2d, valid_length
+
+
 class TransformerLMEmbeddings(PyTorchEmbeddings):
     """Support embeddings trained with the TransformerLanguageModel class
 
@@ -128,8 +182,7 @@ class TransformerLMEmbeddings(PyTorchEmbeddings):
         d_k = kwargs.get('d_k')
         embed_type = kwargs.get('word_embed_type', 'positional')
         rpr_k = kwargs.get('rpr_k')
-        x_embedding = create_embeddings(vsz=self.vsz, dsz=self.d_model, embed_type=embed_type)
-        self.dsz = self.init_embed({'x': x_embedding})
+        self.dsz = self.init_embed(dsz=self.d_model, vsz=self.vsz, embed_type=embed_type, dropout=pdrop)
         self.proj_to_dsz = pytorch_linear(self.dsz, self.d_model) if self.dsz != self.d_model else _identity
         self.transformer = TransformerEncoderStack(num_heads, d_model=self.d_model, pdrop=pdrop, scale=True,
                                                    layers=layers, d_ff=d_ff, rpr_k=rpr_k, d_k=d_k)
@@ -139,25 +192,15 @@ class TransformerLMEmbeddings(PyTorchEmbeddings):
     def embed(self, input):
         embedded = self.embeddings['x'](input)
         embedded_dropout = self.embed_dropout(embedded)
-        if self.embeddings_proj:
-            embedded_dropout = self.embeddings_proj(embedded_dropout)
         return embedded_dropout
 
-    def init_embed(self, embeddings, **kwargs):
+    def init_embed(self, **kwargs):
+        x_embedding = create_embeddings(vsz=kwargs.get('vsz'), dsz=kwargs.get('dsz'), embed_type=kwargs.get('embed_type'))
+        embeddings = {'x': x_embedding}
         pdrop = float(kwargs.get('dropout', 0.1))
         self.embed_dropout = nn.Dropout(pdrop)
         self.embeddings = EmbeddingsStack(embeddings)
-        input_sz = 0
-        for k, embedding in embeddings.items():
-            input_sz += embedding.get_dsz()
-
-        projsz = kwargs.get('projsz')
-        if projsz:
-            self.embeddings_proj = pytorch_linear(input_sz, projsz)
-            print('Applying a transform from {} to {}'.format(input_sz, projsz))
-            return projsz
-        else:
-            self.embeddings_proj = None
+        input_sz = x_embedding.get_dsz()
         return input_sz
 
     def _model_mask(self, nctx):
@@ -252,3 +295,71 @@ class TransformerLMPooledEmbeddingsModel(TransformerLMEmbeddingsModel):
     def get_output(self, inputs, z):
         z = self.pooling_op(inputs, z)
         return z if self.finetune else z.detach()
+
+
+class TransformerLMCharEmbeddings(TransformerLMEmbeddings):
+    """Use positional or learned positional CharConvEmbeddings instead of LookupTableEmbeddings as an LM using chars"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        pooling = kwargs.get('pooling', 'cls')
+        if pooling == 'max':
+            self.pooling_op = _max_pool
+        elif pooling == 'mean':
+            self.pooling_op = _mean_pool
+        else:
+            self.pooling_op = self._cls_pool
+
+    def init_embed(self, **kwargs):
+        char_embedding_kwargs = {
+            "dsz": 16,
+            "wsz": 128,
+            "keep_unused": True,
+            "cfiltsz": [
+                [1, 32],
+                [2, 32],
+                [3, 64],
+                [4, 128],
+                [5, 256],
+                [6, 512],
+                [7, 1024]
+            ],
+            "gating": "highway",
+            "num_gates": 2,
+            "projsz": 512}
+        char_embedding_kwargs['embed_type'] = kwargs.get('embed_type', 'positional-char-conv')
+        x_embedding = create_embeddings(**char_embedding_kwargs, vsz=self.vsz)
+        embeddings = {'x': x_embedding}
+        pdrop = float(kwargs.get('dropout', 0.1))
+        self.embed_dropout = nn.Dropout(pdrop)
+        self.embeddings = EmbeddingsStack(embeddings)
+        input_sz = x_embedding.get_dsz()
+        return input_sz
+
+    def _cls_pool(self, inputs, tensor):
+        # here the inputs is [B, T, W], the tensor (transformer output) is [B, T, H]
+        pooled = tensor[inputs[:, :, 0] == self.cls_index]
+        return pooled
+
+    def get_output(self, inputs, z):
+        pooled = self.pooling_op(inputs, z)
+        return pooled if self.finetune else pooled.detach()
+
+    def forward(self, x):
+        # for char x has dim: [B, 1, 1, T, W]
+        input_mask = torch.zeros(x.shape, device=x.device, dtype=torch.long).masked_fill(x != 0, 1).unsqueeze(1).unsqueeze(1)
+        # [B, 1, 1, T, W] -> [B, 1, 1, T]. mask only need to work on T dimension
+        input_mask = input_mask[:, :, :, :, 0]
+        model_mask = self._model_mask(x.shape[1]).type_as(input_mask)  # [1, 1, T, T]
+        input_mask = input_mask & model_mask  # [B, 1, T, T]
+        embedding = self.embed(x)
+        embedding = self.proj_to_dsz(embedding)
+        transformer_output = self.transformer((embedding, input_mask))
+        return self.get_output(x, transformer_output)
+
+
+@register_embeddings(name='tlm-chars-embed-pooled')
+class TransformerLMCharEmbeddingsModel(PyTorchEmbeddingsModel, TransformerLMCharEmbeddings):
+    """Register embedding model for usage in mead"""
+    pass

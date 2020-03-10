@@ -177,7 +177,7 @@ class TensorDatasetReaderBase(object):
         self.num_words = {}
 
     def build_vocab(self, files):
-        vocabs = {k: Counter() for k in self.vectorizers.keys()}
+        vocabs = {k: Counter({'[CLS]': 1}) for k in self.vectorizers.keys()}
 
         for file in files:
             if file is None:
@@ -307,15 +307,23 @@ def load_embed_and_vocab(token_type, reader, dataset, dataset_key, embed_type, d
         logger.info("Loading cached preprocessing info [%s]", preproc_cache)
         preproc_data = torch.load(preproc_cache)
         vectorizers_mxlen = preproc_data['vectorizers_mxlen']
-        for k, vectorizer in reader.vectorizers.items():
-            vectorizer.max_seen = vectorizers_mxlen[k]
+        if token_type == 'chars':
+            char_vectorizer = reader.vectorizers['x']
+            tok_vectorizer = reader.vectorizers['y']
+            char_vectorizer.max_seen_tok, char_vectorizer.max_seen_char = vectorizers_mxlen['x']
+            tok_vectorizer.max_seen = vectorizers_mxlen['y']
+        else:
+            reader.vectorizers['x'].max_seen = vectorizers_mxlen['x']
     else:
         vocab_sources = [dataset['train_file'], dataset['valid_file']]
         vocabs = reader.build_vocab(vocab_sources)
         valid_num_words = reader.num_words[dataset['valid_file']]
-        vectorizers_maxlen = {}
-        for k, vectorizer in reader.vectorizers.items():
-            vectorizers_maxlen[k] = vectorizer.max_seen
+        vectorizers_mxlen = {}
+        if token_type == 'chars':
+            vectorizers_mxlen['x'] = (reader.vectorizers['x'].max_seen_tok, reader.vectorizers['x'].max_seen_char)
+            vectorizers_mxlen['y'] = reader.vectorizers['y'].max_seen
+        else:
+            vectorizers_mxlen['x'] = reader.vectorizers['x'].max_seen
         logger.info("Read vocabulary")
         embeddings = {}
 
@@ -343,7 +351,7 @@ def load_embed_and_vocab(token_type, reader, dataset, dataset_key, embed_type, d
             embeddings['x'] = x_embedding['embeddings']
 
         preproc_data = {'vocabs': vocabs, 'embeddings': embeddings, 'valid_num_words': valid_num_words,
-                        'tgt_key': tgt_key, 'vectorizers_mxlen': vectorizers_maxlen}
+                        'tgt_key': tgt_key, 'vectorizers_mxlen': vectorizers_mxlen}
         logger.info("Saving preprocessing info [%s]", preproc_cache)
         torch.save(preproc_data, preproc_cache)
     return preproc_data
@@ -485,6 +493,11 @@ def train():
     valid_loader = DataLoader(valid_set, batch_size=args.batch_size, shuffle=False)
     logger.info("Loaded datasets")
 
+    if len(args.rpr_k) == 0 or args.rpr_k[0] < 1:
+        rpr_k = None
+    else:
+        rpr_k = args.rpr_k
+
     if args.mlm:
         from baseline.pytorch.lm import TransformerMaskedLanguageModel
         model = TransformerMaskedLanguageModel.create(embeddings,
@@ -495,7 +508,7 @@ def train():
                                                       gpu=False,
                                                       num_heads=args.num_heads,
                                                       layers=args.num_layers,
-                                                      rpr_k=args.rpr_k,
+                                                      rpr_k=rpr_k,
                                                       d_k=args.d_k,
                                                       src_keys=['x'], tgt_key=tgt_key)
     else:
@@ -507,7 +520,7 @@ def train():
                                                 gpu=False,
                                                 num_heads=args.num_heads,
                                                 layers=args.num_layers,
-                                                rpr_k=args.rpr_k,
+                                                rpr_k=rpr_k,
                                                 d_k=args.d_k,
                                                 src_keys=['x'], tgt_key=tgt_key)
     model.to(args.device)
@@ -651,10 +664,12 @@ def train():
             logger.info("Creating checkpoint: %s", checkpoint_name)
             if args.distributed:
                 torch.save(model.module.state_dict(), checkpoint_name+'.pth')
-                save_tlm_npz(model.module, checkpoint_name+'.npz')
+                if args.tokens != 'chars':
+                    save_tlm_npz(model.module, checkpoint_name+'.npz')
             else:
                 torch.save(model.state_dict(), checkpoint_name+'.pth')
-                save_tlm_npz(model, checkpoint_name+'.npz')
+                if args.tokens != 'chars':
+                    save_tlm_npz(model, checkpoint_name+'.npz')
 
             rm_old_checkpoints(model_base, epoch)
 
