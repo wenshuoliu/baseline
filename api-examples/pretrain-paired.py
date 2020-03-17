@@ -129,7 +129,10 @@ def train():
         format="%(name)s: %(levelname)s: %(message)s",
         level=logging.INFO if args.local_rank in [-1, 0] else logging.WARN
     )
-    args.distributed = args.distributed or int(os.environ.get("WORLD_SIZE", 1)) > 1
+
+    num_gpus = int(os.environ.get("WORLD_SIZE", 1))
+    args.distributed = args.distributed or num_gpus > 1
+    logger.info(f"Using {num_gpus} GPUs in this job.")
 
     if args.distributed:
         if args.local_rank == -1:
@@ -186,11 +189,11 @@ def train():
 
     # according to pytorch, len(train_loader) will return len(train_set) when train_set is IterableDataset, so manually
     # correct it here
-    steps_per_epoch = len(train_loader) // args.batch_size
+    steps_per_epoch = len(train_loader) // (args.batch_size*num_gpus)
     update_on = steps_per_epoch // args.update_steps
     report_on = update_on // 10
-    logger.info(f"Steps per epoch: {steps_per_epoch}. Saving checkpoint every {update_on} steps.")
-    cosine_decay = CosineDecaySchedulerPyTorch(len(train_loader) * args.epochs, lr=args.lr)
+    logger.info(f"Steps per epoch per gpu: {steps_per_epoch}. Saving checkpoint every {update_on} steps.")
+    cosine_decay = CosineDecaySchedulerPyTorch(steps_per_epoch * args.epochs, lr=args.lr)
     linear_warmup = WarmupLinearSchedulerPyTorch(args.warmup_steps, lr=args.lr)
     lr_sched = CompositeLRScheduler(linear_warmup, cosine_decay, lr=args.lr)
 
@@ -198,10 +201,10 @@ def train():
     start_epoch = 0
     if args.restart_from:
         model.load_state_dict(torch.load(args.restart_from))
-        start_epoch = int(args.restart_from.split("-")[-1].split(".")[0]) - 1
-        global_step = (start_epoch+1) * steps_per_epoch
-        logger.info("Restarting from a previous checkpoint %s.\n\tStarting at global_step=%d, epoch=%d",
-                    args.restart_from, global_step, start_epoch+1)
+        global_step = int(args.restart_from.split("-")[-1].split(".")[0])
+        start_epoch = global_step // steps_per_epoch
+        logger.info("Restarting from a previous checkpoint %s.\n\tStarting at global_step=%d", args.restart_from,
+                    global_step)
     optimizer = OptimizerManager(model, global_step, optim=args.optim, lr=args.lr, lr_function=lr_sched, weight_decay=args.weight_decay)
     logger.info("Model has {:,} parameters".format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
@@ -213,7 +216,7 @@ def train():
     model_base = os.path.join(args.basedir, 'checkpoint')
 
     # This is the training loop
-    steps = 0
+    steps = global_step
     for epoch in range(start_epoch, args.epochs):
         avg_loss = Average('average_train_loss')
         metrics = {}
