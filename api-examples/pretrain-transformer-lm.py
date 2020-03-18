@@ -534,7 +534,10 @@ def train():
     global_step = 0
     start_epoch = 0
     if args.restart_from:
-        model.load_state_dict(torch.load(args.restart_from))
+        mismatch = model.load_state_dict(torch.load(args.restart_from), strict=False)
+        if mismatch:
+            logger.warning(f"Embedding doesn't match with the checkpoint being loaded. \n"
+                           f"missing keys: {mismatch.missing_keys}\n unexpected keys: {mismatch.unexpected_keys}")
         start_epoch = int(args.restart_from.split("-")[-1].split(".")[0]) - 1
         global_step = (start_epoch+1) * steps_per_epoch
         logger.info("Restarting from a previous checkpoint %s.\n\tStarting at global_step=%d, epoch=%d",
