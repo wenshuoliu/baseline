@@ -104,7 +104,8 @@ class PairedModel(nn.Module):
                  d_out=512,
                  d_k=64,
                  weight_std=0.02,
-                 rpr_k=None):
+                 rpr_k=None,
+                 ffn_pdrop=0.2):
         super().__init__()
         if stacking_layers is None:
             stacking_layers = [d_model] * 3
@@ -114,11 +115,13 @@ class PairedModel(nn.Module):
         transformer = TransformerEncoderStack(num_heads=num_heads, d_model=d_model,
                                               pdrop=dropout, layers=num_layers, activation='gelu', d_ff=d_ff,
                                               d_k=d_k, rpr_k=rpr_k)
-        self.attention_layer = MultiHeadedAttention(2, d_model, dropout, scale=False, d_k=d_k)
+        self.attention_layer = MultiHeadedAttention(2, d_model, dropout, scale=False)
         self.transformer_layers = transformer
         self.embedding_layers = embeddings
-        self.ff1 = DenseStack(d_model, stacking_layers + [d_out], activation='gelu')
-        self.ff2 = DenseStack(d_model, stacking_layers + [d_out], activation='gelu')
+        self.ff1 = DenseStack(d_model, stacking_layers + [d_out], activation='gelu', pdrop_value=ffn_pdrop)
+        self.ff2 = DenseStack(d_model, stacking_layers + [d_out], activation='gelu', pdrop_value=ffn_pdrop)
+        self.ln1 = nn.LayerNorm(d_model, eps=1.e-6)
+        self.ln2 = nn.LayerNorm(d_model, eps=1.e-6)
         self.apply(self.init_layer_weights)
 
     def init_layer_weights(self, module):
@@ -135,7 +138,8 @@ class PairedModel(nn.Module):
         encoded_query = self.transformer_layers((embedded, query_mask))
         encoded_query = self.attention_layer((encoded_query, encoded_query, encoded_query, query_mask))
         encoded_query = encoded_query.sum(1) / query_length.float().sqrt().unsqueeze(1)
-        encoded_query = self.ff1(encoded_query)
+        encoded_query = encoded_query + self.ff1(encoded_query)
+        encoded_query = self.ln1(encoded_query)
         return encoded_query
 
     def encode_response(self, response):
@@ -146,8 +150,8 @@ class PairedModel(nn.Module):
         encoded_response = self.transformer_layers((embedded, response_mask))
         encoded_response = self.attention_layer((encoded_response, encoded_response, encoded_response, response_mask))
         encoded_response = encoded_response.sum(1) / response_length.float().sqrt().unsqueeze(1)
-        encoded_response = self.ff2(encoded_response)
-
+        encoded_response = encoded_response + self.ff2(encoded_response)
+        encoded_response = self.ln2(encoded_response)
         return encoded_response
 
     def forward(self, query, response):
