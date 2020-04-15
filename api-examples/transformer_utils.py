@@ -105,7 +105,8 @@ class PairedModel(nn.Module):
                  d_k=64,
                  weight_std=0.02,
                  rpr_k=None,
-                 ffn_pdrop=0.2):
+                 ffn_pdrop=0.2,
+                 upsample=False):
         super().__init__()
         if stacking_layers is None:
             stacking_layers = [d_model] * 3
@@ -115,13 +116,21 @@ class PairedModel(nn.Module):
         transformer = TransformerEncoderStack(num_heads=num_heads, d_model=d_model,
                                               pdrop=dropout, layers=num_layers, activation='gelu', d_ff=d_ff,
                                               d_k=d_k, rpr_k=rpr_k)
-        self.attention_layer = MultiHeadedAttention(2, d_model, dropout, scale=False)
         self.transformer_layers = transformer
         self.embedding_layers = embeddings
-        self.ff1 = DenseStack(d_model, stacking_layers + [d_out], activation='gelu', pdrop_value=ffn_pdrop)
-        self.ff2 = DenseStack(d_model, stacking_layers + [d_out], activation='gelu', pdrop_value=ffn_pdrop)
-        self.ln1 = nn.LayerNorm(d_model, eps=1.e-6)
-        self.ln2 = nn.LayerNorm(d_model, eps=1.e-6)
+        if upsample:
+            self.upsample = True
+            self.proj_layers = pytorch_linear(d_model, 2*d_model)
+            self.attention_layer = MultiHeadedAttention(2, 2*d_model, dropout, scale=False)
+            self.ff1 = DenseStack(2*d_model, stacking_layers + [d_out], activation='gelu', pdrop_value=ffn_pdrop)
+            self.ff2 = DenseStack(2*d_model, stacking_layers + [d_out], activation='gelu', pdrop_value=ffn_pdrop)
+        else:
+            self.upsample = False
+            self.attention_layer = MultiHeadedAttention(2, d_model, dropout, scale=False)
+            self.ff1 = DenseStack(d_model, stacking_layers + [d_out], activation='gelu', pdrop_value=ffn_pdrop)
+            self.ff2 = DenseStack(d_model, stacking_layers + [d_out], activation='gelu', pdrop_value=ffn_pdrop)
+        self.ln1 = nn.LayerNorm(d_out, eps=1.e-6)
+        self.ln2 = nn.LayerNorm(d_out, eps=1.e-6)
         self.apply(self.init_layer_weights)
 
     def init_layer_weights(self, module):
@@ -136,9 +145,11 @@ class PairedModel(nn.Module):
         query_mask = query_mask.unsqueeze(1).unsqueeze(1)
         embedded = self.embedding_layers(query)
         encoded_query = self.transformer_layers((embedded, query_mask))
+        if self.upsample:
+            encoded_query = self.proj_layers(encoded_query)
         encoded_query = self.attention_layer((encoded_query, encoded_query, encoded_query, query_mask))
         encoded_query = encoded_query.sum(1) / query_length.float().sqrt().unsqueeze(1)
-        encoded_query = encoded_query + self.ff1(encoded_query)
+        encoded_query = self.ff1(encoded_query)
         encoded_query = self.ln1(encoded_query)
         return encoded_query
 
@@ -148,9 +159,11 @@ class PairedModel(nn.Module):
         response_mask = response_mask.unsqueeze(1).unsqueeze(1)
         embedded = self.embedding_layers(response)
         encoded_response = self.transformer_layers((embedded, response_mask))
+        if self.upsample:
+            encoded_response = self.proj_layers(encoded_response)
         encoded_response = self.attention_layer((encoded_response, encoded_response, encoded_response, response_mask))
         encoded_response = encoded_response.sum(1) / response_length.float().sqrt().unsqueeze(1)
-        encoded_response = encoded_response + self.ff2(encoded_response)
+        encoded_response = self.ff2(encoded_response)
         encoded_response = self.ln2(encoded_response)
         return encoded_response
 

@@ -39,7 +39,8 @@ def save_checkpoint(model: torch.nn.Module, model_base: str, count: int, tick_ty
     rm_old_checkpoints(model_base, count)
 
 
-def create_model(embeddings, d_model, d_ff, dropout, num_heads, num_layers, model_type, rpr_k, d_k):
+def create_model(embeddings, d_model, d_ff, dropout, num_heads, num_layers, model_type, rpr_k, d_k, stacking_layers,
+                 upsample):
     if len(rpr_k) == 0 or rpr_k[0] < 1:
         rpr_k = None
     if model_type == "encoder-decoder":
@@ -57,7 +58,8 @@ def create_model(embeddings, d_model, d_ff, dropout, num_heads, num_layers, mode
                "rpr_k": rpr_k}
         model = TiedEmbeddingsSeq2SeqModel(embeddings, **hps)
     else:
-        model = PairedModel(embeddings, d_model, d_ff, dropout, num_heads, num_layers, rpr_k=rpr_k, d_k=d_k)
+        model = PairedModel(embeddings, d_model, d_ff, dropout, num_heads, num_layers, rpr_k=rpr_k, d_k=d_k,
+                            stacking_layers=stacking_layers, upsample=upsample)
 
     logger.info(model)
     return model
@@ -74,6 +76,8 @@ def train():
     parser.add_argument("--d_ff", type=int, default=2048, help="FFN dimension")
     parser.add_argument("--d_k", type=int, default=None, help="Dimension per head.  Use if num_heads=1 to reduce dims")
     parser.add_argument("--num_heads", type=int, default=8, help="Number of heads")
+    parser.add_argument("--upsample", type=str2bool, default=False)
+    parser.add_argument("--stacking_layers", type=int, nargs='+', default=[512, 512, 512])
     parser.add_argument("--num_train_workers", type=int, default=4, help="Number train workers")
     parser.add_argument("--num_valid_workers", type=int, default=2, help="Number valid workers")
     parser.add_argument("--num_layers", type=int, default=6, help="Number of layers")
@@ -179,8 +183,8 @@ def train():
     logger.info("Loaded datasets")
 
     model = create_model(embeddings, d_model=args.d_model, d_ff=args.d_ff, dropout=args.dropout,
-                         num_heads=args.num_heads, num_layers=args.num_layers,
-                         model_type=args.model_type, rpr_k=args.rpr_k, d_k=args.d_k)
+                         num_heads=args.num_heads, num_layers=args.num_layers, model_type=args.model_type,
+                         rpr_k=args.rpr_k, d_k=args.d_k, stacking_layers=args.stacking_layers, upsample=args.upsample)
     model.to(args.device)
     loss_function = model.create_loss(args.loss)
     loss_function.to(args.device)
