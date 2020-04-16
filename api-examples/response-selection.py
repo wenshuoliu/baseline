@@ -1,4 +1,5 @@
 import argparse
+import os
 from transformer_utils import *
 from baseline.pytorch.lm import TransformerLanguageModel
 from baseline.progress import create_progress_bar
@@ -116,7 +117,12 @@ model = create_model(args.model_type,
                      rpr_k=args.rpr_k,
                      d_k=args.d_k,
                      upsample=args.upsample)
-model.load_state_dict(torch.load(args.ckpt))
+if os.path.isdir(args.ckpt):
+    checkpoint = find_latest_checkpoint(args.ckpt)
+    logger.warning("Found latest checkpoint %s", checkpoint)
+else:
+    checkpoint = args.ckpt
+model.load_state_dict(torch.load(checkpoint, map_location=torch.device('cpu')))
 model.to(args.device)
 
 numerator = 0
