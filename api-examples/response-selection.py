@@ -169,5 +169,5 @@ for batch in test_loader:
 pg.done()
 acc = float(numerator)/denominator
 
-print(f"The 1@{args.recall_k} accuracy is {acc}")
-
+with open('./results.txt', 'a') as wf:
+    wf.write(f"Checkpoint: {checkpoint}; 1@{args.recall_k} accuracy: {acc}\n")
