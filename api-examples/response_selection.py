@@ -1,6 +1,7 @@
 import argparse
 import os
 from transformer_utils import *
+from pretrain_paired_pytorch import create_model
 from baseline.pytorch.lm import TransformerLanguageModel
 from eight_mile.progress import create_progress_bar
 from eight_mile.utils import str2bool
@@ -15,14 +16,13 @@ parser.add_argument("--d_ff", type=int, default=2048, help="FFN dimension")
 parser.add_argument("--d_k", type=int, default=None, help="Dimension per head.  Use if num_heads=1 to reduce dims")
 parser.add_argument("--num_heads", type=int, default=8, help="Number of heads")
 parser.add_argument("--num_ft_workers", type=int, default=4, help="Number train workers")
-parser.add_argument("--num_test_workers", type=int, default=2, help="Number valid workers")
 parser.add_argument("--num_layers", type=int, default=6, help="Number of layers")
 parser.add_argument("--nctx", type=int, default=64, help="Max context length (for both encoder and decoder)")
 parser.add_argument("--embed_type", type=str, default='positional',
                     help="register label of the embeddings, so far support positional or learned-positional")
 parser.add_argument("--stacking_layers", type=int, nargs='+', default=[1024, 1024, 1024])
 parser.add_argument('--rpr_k', help='Relative attention positional sizes pass 0 if you dont want relative attention',
-                    type=int, default=[3, 5, 48, 48, 48, 48], nargs='+')
+                    type=int, default=[8], nargs='+')
 parser.add_argument("--reduction_d_k", type=int, default=64, help="Dimensions of Key and Query in the single headed"
                                                                   "reduction layers")
 parser.add_argument("--ckpt", type=str, help="path to the model checkpoint")
@@ -44,12 +44,21 @@ vocabs = preproc_data['vocab']
 embeddings = preproc_data['embeddings']
 logger.info("Loaded embeddings")
 
-test_set = reader.load(args.test_file, vocabs)
+test_set = reader.load(args.test_file, vocabs, distribute=False, shuffle=False)
 ind2tok = {ind: tok for tok, ind in vocabs.items()}
 
 # use other samples in a batch as negative samples. Don't shuffle to compare with conveRT benchmarks
-test_loader = DataLoader(test_set, batch_size=args.recall_k, num_workers=args.num_test_workers)
+test_loader = DataLoader(test_set, batch_size=args.recall_k)
+test_itr = iter(test_loader)
+test_steps = len(test_loader) // args.recall_k
 logger.info("Loaded datasets")
+
+if len(args.rpr_k) == 0 or args.rpr_k[0] < 1:
+    rpr_k = None
+elif len(args.rpr_k) == 1:
+    rpr_k = args.rpr_k[0]
+else:
+    rpr_k = args.rpr_k
 
 model = create_model(embeddings,
                      model_type='dual-encoder',
@@ -59,7 +68,7 @@ model = create_model(embeddings,
                      num_layers=args.num_layers,
                      stacking_layers=args.stacking_layers,
                      dropout=0.,
-                     rpr_k=args.rpr_k,
+                     rpr_k=rpr_k,
                      d_k=args.d_k,
                      reduction_d_k=args.reduction_d_k,
                      ff_pdrop=0.,
@@ -76,8 +85,9 @@ model.to(args.device)
 numerator = 0
 denominator = 0
 model.eval()
-pg = create_progress_bar(len(test_loader)//args.recall_k)
-for batch in test_loader:
+pg = create_progress_bar(test_steps)
+for i in range(test_steps):
+    batch = next(test_itr)
     if batch[0].shape[0] != args.recall_k:
         break
     with torch.no_grad():
