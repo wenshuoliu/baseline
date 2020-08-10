@@ -536,11 +536,13 @@ class MultiFileDatasetReader:
     """Provide a base-class to do operations that are independent of token representation
     """
 
-    def __init__(self, nctx=64, model_file=None, vocab_file=None, pattern='*.txt', reader_type="ntp"):
+    def __init__(self, nctx=64, model_file=None, vocab_file=None, pattern='*.txt', reader_type="ntp",
+                 vectorizer_begin_tok=None, vectorizer_end_tok=None):
         self.nctx = nctx
         self.pattern = pattern
         self.reader_type = reader_type
-        self.vectorizer = BPEVectorizer1D(model_file=model_file, vocab_file=vocab_file, mxlen=nctx)
+        self.vectorizer = BPEVectorizer1D(model_file=model_file, vocab_file=vocab_file, mxlen=nctx,
+                                          emit_begin_tok=vectorizer_begin_tok, emit_end_tok=vectorizer_end_tok)
 
     def build_vocab(self, _=None):
         return {'x': self.vectorizer.vocab}

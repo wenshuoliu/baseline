@@ -18,8 +18,7 @@ parser.add_argument("--num_heads", type=int, default=8, help="Number of heads")
 parser.add_argument("--num_ft_workers", type=int, default=4, help="Number train workers")
 parser.add_argument("--num_layers", type=int, default=6, help="Number of layers")
 parser.add_argument("--nctx", type=int, default=64, help="Max context length (for both encoder and decoder)")
-parser.add_argument("--embed_type", type=str, default='positional',
-                    help="register label of the embeddings, so far support positional or learned-positional")
+parser.add_argument("--embed_type", type=str, default='positional', help="register label of the embeddings")
 parser.add_argument("--stacking_layers", type=int, nargs='+', default=[1024, 1024, 1024])
 parser.add_argument('--rpr_k', help='Relative attention positional sizes pass 0 if you dont want relative attention',
                     type=int, default=[8], nargs='+')
@@ -34,6 +33,7 @@ parser.add_argument("--recall_top", type=int, default=1, help="whether the corre
 parser.add_argument("--device", type=str,
                     default="cuda" if torch.cuda.is_available() else "cpu",
                     help="Device (cuda or cpu)")
+parser.add_argument("--output", type=str, default='results.txt', help='write results to a file')
 args = parser.parse_args()
 
 reader = MultiFileDatasetReader(args.nctx, args.subword_model_file, args.subword_vocab_file, '*.txt', 'ntp')
@@ -72,7 +72,8 @@ model = create_model(embeddings,
                      d_k=args.d_k,
                      reduction_d_k=args.reduction_d_k,
                      ff_pdrop=0.,
-                     logger=logger)
+                     logger=logger,
+                     windowed_ra=False)
 
 if os.path.isdir(args.ckpt):
     checkpoint, _ = find_latest_checkpoint(args.ckpt)
@@ -108,5 +109,5 @@ pg.done()
 acc = float(numerator)/denominator
 
 print(f"{args.recall_top}@{args.recall_k} acc: {acc}")
-with open('./results.txt', 'a') as wf:
+with open(args.output, 'a') as wf:
     wf.write(f"Checkpoint: {checkpoint}; {args.recall_top}@{args.recall_k} accuracy: {acc}\n")
