@@ -17,6 +17,7 @@ from eight_mile.tf.serialize import save_tlm_npz
 import tensorflow as tf
 import json
 logger = logging.getLogger(__file__)
+logger.setLevel(logging.INFO)
 
 
 """Pre-train a Transformer model in TensorFlow
@@ -133,7 +134,7 @@ def create_distribute_strategy(strategy_name, endpoint=None):
         else:
             raise Exception(f"Unsupported strategy {strategy_name}")
 
-        for tpu in tf.config.list_logical_devices('GPU'):
+        for tpu in tf.config.experimental.list_logical_devices('GPU'):
             logger.info('Device [%s]', tpu.name)
 
     return strategy
@@ -333,7 +334,13 @@ def train():
             start = time.time()
             train_iter = iter(train_loader)
             for i in range(steps_per_epoch):
-                loss = _distributed_train_step(next(train_iter))
+                batch = next(train_iter)
+                loss = _distributed_train_step(batch)
+                if math.isnan(loss.numpy().item()):
+                    x, y = batch
+                    logger.info(f"Batch causing nan loss:")
+                    logger.info(f"x: {x.numpy().tolist()}")
+                    logger.info(f"y: {y.numpy().tolist()}")
                 avg_loss.update(loss.numpy().item())
                 tf.summary.scalar("train_loss", data=loss, step=optimizer.global_step)
 
