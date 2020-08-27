@@ -42,7 +42,7 @@ class Loss:
         losses = tf.reduce_sum(losses)
         non_zero = tf.reduce_sum(loss_mask)
         losses /= non_zero
-        if tf.debugging.is_nan(losses):
+        if tf.reduce_any(tf.math.is_nan(losses)):
             logger.info(f"losses: {losses}")
             logger.info(f"labels: {labels}")
             logger.info(f"logits: {logits}")
