@@ -301,6 +301,10 @@ def train():
         :return:
         """
         per_replica_loss = strategy.experimental_run_v2(_replicated_train_step, args=(inputs,))
+        local_values = strategy.experimental_local_results(per_replica_loss)
+        for v in local_values:
+            if math.isnan(v.numpy().item()):
+                logger.info(f"Inputs for nan loss: {inputs}")
         return strategy.reduce(tf.distribute.ReduceOp.SUM, per_replica_loss, axis=None)
 
     valid_loss_function = Loss(vocab_size, args.nctx)
@@ -339,8 +343,8 @@ def train():
                 if math.isnan(loss.numpy().item()):
                     x, y = batch
                     logger.info(f"Batch causing nan loss:")
-                    logger.info(f"x: {x.numpy().tolist()}")
-                    logger.info(f"y: {y.numpy().tolist()}")
+                    logger.info(f"x: {x.values}")
+                    logger.info(f"y: {y.values}")
                 avg_loss.update(loss.numpy().item())
                 tf.summary.scalar("train_loss", data=loss, step=optimizer.global_step)
 
