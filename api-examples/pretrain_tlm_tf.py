@@ -303,8 +303,12 @@ def train():
         per_replica_loss = strategy.experimental_run_v2(_replicated_train_step, args=(inputs,))
         local_values = strategy.experimental_local_results(per_replica_loss)
         for v in local_values:
-            if math.isnan(v.numpy().item()):
-                logger.info(f"Inputs for nan loss: {inputs}")
+            if tf.math.is_nan(v):
+                print(local_values)
+                logger.info(f"Inputs for nan loss: ")
+                x, y = inputs
+                logger.info(f"x: {x}")
+                logger.info(f"y: {y}")
         return strategy.reduce(tf.distribute.ReduceOp.SUM, per_replica_loss, axis=None)
 
     valid_loss_function = Loss(vocab_size, args.nctx)
@@ -333,6 +337,7 @@ def train():
         for epoch in range(start_epoch, args.epochs):
             SET_TRAIN_FLAG(True)
             logger.info('Starting epoch %d', epoch + 1)
+            logger.info(f"training in eager mode: {tf.executing_eagerly()}")
             avg_loss = Average('average_train_loss')
             metrics = {}
             start = time.time()
