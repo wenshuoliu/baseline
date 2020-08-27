@@ -301,14 +301,14 @@ def train():
         :return:
         """
         per_replica_loss = strategy.experimental_run_v2(_replicated_train_step, args=(inputs,))
-        local_values = strategy.experimental_local_results(per_replica_loss)
-        for v in local_values:
-            if tf.math.is_nan(v):
-                print(local_values)
-                logger.info(f"Inputs for nan loss: ")
-                x, y = inputs
-                logger.info(f"x: {x}")
-                logger.info(f"y: {y}")
+        # local_values = strategy.experimental_local_results(per_replica_loss)
+        # for v in local_values:
+        #     if tf.math.is_nan(v):
+        #         print(local_values)
+        #         logger.info(f"Inputs for nan loss: ")
+        #         x, y = inputs
+        #         logger.info(f"x: {x}")
+        #         logger.info(f"y: {y}")
         return strategy.reduce(tf.distribute.ReduceOp.SUM, per_replica_loss, axis=None)
 
     valid_loss_function = Loss(vocab_size, args.nctx)
@@ -347,9 +347,14 @@ def train():
                 loss = _distributed_train_step(batch)
                 if math.isnan(loss.numpy().item()):
                     x, y = batch
+                    logger.info(f"loss: {loss}")
                     logger.info(f"Batch causing nan loss:")
-                    logger.info(f"x: {x.values}")
-                    logger.info(f"y: {y.values}")
+                    logger.info(f"x replica: ")
+                    for x_ in x.values:
+                        logger.info(x_.numpy().tolist())
+                    logger.info(f"y replica: ")
+                    for y_ in y.values:
+                        logger.info(y_.numpy().tolist())
                 avg_loss.update(loss.numpy().item())
                 tf.summary.scalar("train_loss", data=loss, step=optimizer.global_step)
 
