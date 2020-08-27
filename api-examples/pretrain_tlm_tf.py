@@ -46,6 +46,7 @@ class Loss:
             logger.info(f"losses: {losses}")
             logger.info(f"labels: {labels}")
             logger.info(f"logits: {logits}")
+            tf.debugging.check_numerics(logits, "nan or inf logits")
             logger.info(f"non_zero: {non_zero}")
         return losses
 
