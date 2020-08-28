@@ -222,7 +222,7 @@ def train():
 
     def dataset_train_fn(input_context):
         batch_size = input_context.get_per_replica_batch_size(args.batch_size)
-        ds = get_dataset(args.train_dir, args.file_type, args.num_train_workers, causal=args.causal, shuffle=False).batch(batch_size)
+        ds = get_dataset(args.train_dir, args.file_type, args.num_train_workers, causal=args.causal).batch(batch_size)
         return ds.shard(
             input_context.num_input_pipelines, input_context.input_pipeline_id
         )
