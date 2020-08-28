@@ -222,7 +222,7 @@ def train():
 
     def dataset_train_fn(input_context):
         batch_size = input_context.get_per_replica_batch_size(args.batch_size)
-        ds = get_dataset(args.train_dir, args.file_type, args.num_train_workers, causal=args.causal).batch(batch_size)
+        ds = get_dataset(args.train_dir, args.file_type, args.num_train_workers, causal=args.causal, shuffle=False).batch(batch_size)
         return ds.shard(
             input_context.num_input_pipelines, input_context.input_pipeline_id
         )
@@ -352,15 +352,15 @@ def train():
                 batch = next(train_iter)
                 loss = _distributed_train_step(batch)
                 if math.isnan(loss.numpy().item()):
+                    import numpy as np
                     x, y = batch
                     logger.info(f"loss: {loss}")
-                    logger.info(f"Batch causing nan loss:")
-                    logger.info(f"x replica: ")
-                    for x_ in x.values:
-                        logger.info(x_.numpy().tolist())
-                    logger.info(f"y replica: ")
-                    for y_ in y.values:
-                        logger.info(y_.numpy().tolist())
+                    logger.info(f"Found nan loss at step {i}")
+                    to_save = {f'x_{j}': x for j, x.numpy() in enumerate(x.values)}
+                    np.savez(os.path.join(args.basedir, f'x_{i}.npz'), **to_save)
+                    to_save = {f'y_{j}': y for j, y.numpy() in enumerate(y.values)}
+                    np.savez(os.path.join(args.basedir, f'y_{i}.npz'), **to_save)
+
                 avg_loss.update(loss.numpy().item())
                 tf.summary.scalar("train_loss", data=loss, step=optimizer.global_step)
 
