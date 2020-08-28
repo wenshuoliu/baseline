@@ -356,9 +356,9 @@ def train():
                     x, y = batch
                     logger.info(f"loss: {loss}")
                     logger.info(f"Found nan loss at step {i}")
-                    to_save = {f'x_{j}': x for j, x.numpy() in enumerate(x.values)}
+                    to_save = {f'x_{j}': x.numpy() for j, x in enumerate(x.values)}
                     np.savez(os.path.join(args.basedir, f'x_{i}.npz'), **to_save)
-                    to_save = {f'y_{j}': y for j, y.numpy() in enumerate(y.values)}
+                    to_save = {f'y_{j}': y.numpy() for j, y in enumerate(y.values)}
                     np.savez(os.path.join(args.basedir, f'y_{i}.npz'), **to_save)
 
                 avg_loss.update(loss.numpy().item())
